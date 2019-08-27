@@ -1,0 +1,111 @@
+---
+title: "Machine Learning Class Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/medda/Desktop/git")
+library(parallel)
+library(doParallel)
+library(caret)
+library(quantmod)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+## Summary
+
+In this exercise, we're attempting to predict if a given exercies was done correctly by using measured accelerations on the belt, forearm, arm, and dumbell of 6 different participants. Using methods described in class, we fit several different models, select the best fit model using a validation set, then predicting the exercise on the test set.
+
+The data sets are courtesy of:
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+More information can be found:
+
+http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+
+
+## Setup
+read the two csv files (Training and Testing) into R, then set the seed so it's repeatable.
+
+```{r Load}
+Training<-read.csv("pml-training.csv", stringsAsFactors = FALSE, na.strings=c("NA",""))
+Testing<-read.csv("pml-testing.csv", stringsAsFactors = FALSE, na.strings = c("NA",""))
+
+set.seed(923785)
+```
+
+Next, reduce training set to remove the columns not related to the classe or accelerations on the body and split training set to create a validation set for model selection.
+
+```{r valset}
+Training$classe<-factor(Training$classe)
+Training<-Training[,(grep(pattern="^accel*|classe", x=names(Training)))]
+Testing<-Testing[,(grep(pattern="^accel*|classe|user_name|problem_id", x=names(Testing)))]
+datapart<-createDataPartition(y=Training$classe, p=.75, list=FALSE)
+Valset<-Training[-datapart,]
+Training<-Training[datapart,]
+```
+
+## Training
+
+Now that we've reduced the data sets and split our training set into a validation set, we can run several different types of models.
+
+```{r train}
+fitControl<-trainControl(method="cv",number=5, allowParallel = TRUE)
+TrainFitrf<-train(classe~., data=Training, method="rf", prox=TRUE, trControl=fitControl)
+TrainFitgbm<-train(classe~., data=Training, method="gbm", verbose=FALSE)
+TrainFitbag<-train(classe~., data=Training, method="treebag")
+TrainFitrp<-train(classe~., data=Training, method="rpart")
+```  
+```{r decluster, include=FALSE}
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+## Error Checking
+
+Using our cross validation set, we predict the outcomes of the validation set to see the error rate or each model
+
+predict using each model:
+```{r predict}
+predictrf<-predict(TrainFitrf, Valset)
+predictgbm<-predict(TrainFitgbm, Valset)
+predictbag<-predict(TrainFitbag, Valset)
+predictrp<-predict(TrainFitrp, Valset)
+```
+
+Now we create a confusion matrix for each model to see how many we correctly identified and see our error rate.
+```{r confuse}
+confuserf<-confusionMatrix(predictrf, Valset$classe)
+confusegbm<-confusionMatrix(predictgbm, Valset$classe)
+confusebag<-confusionMatrix(predictbag, Valset$classe)
+confuserp<-confusionMatrix(predictrp, Valset$classe)
+```
+
+Now, outputting the accuracy levels of each confusion matrix so we can select the best model.
+```{r compare}
+confuserf$overall
+confusegbm$overall
+confusebag$overall
+confuserp$overall
+```
+
+We can see that the random forest model creates the best prediction with an accuracy of 95%. 
+
+
+## Final Prediction
+
+Finally, we can run our selected model against our reduced test data set. We'll also marry it to the username and problem id.
+
+```{r predicttest}
+predict_test<-predict(TrainFitrf, Testing)
+Final_Prediction<-cbind(Testing[,c("user_name","problem_id")],as.character(predict_test))
+```
+
+The final predictions are as follows:
+```{r finaltable}
+print(Final_Prediction)
+```
